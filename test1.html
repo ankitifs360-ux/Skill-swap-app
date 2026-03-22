@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<body>
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+<script>
+  const TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY5YmU3YTk4OWI0ZGQ3NGYzZmE1ZDcyZSIsImlhdCI6MTc3NDA5MDk0MywiZXhwIjoxNzc0MTc3MzQzfQ.4-9w_5sZKAIWIUypud5b6ULMePjgkhF1IG9tn_Y7jJY";
+  const RECEIVER_ID = "69be7af39b4dd74f3fa5d733";
+
+  const socket = io("http://127.0.0.1:8000", {
+    auth: {
+      token: TOKEN
+    },
+    transports: ["websocket"]
+  });
+
+  socket.on("connect", () => {
+    console.log("Connected:", socket.id);
+
+    socket.emit("sendMessage", {
+      receiver: RECEIVER_ID,
+      message: "Hello from private chat"
+    });
+  });
+
+  socket.on("receiveMessage", (data) => {
+    console.log("Received:", data);
+  });
+
+  socket.on("messageError", (data) => {
+    console.log("Message error:", data);
+  });
+
+  socket.on("connect_error", (error) => {
+    console.log("Connect error:", error.message);
+  });
+</script>
+</body>
+</html>

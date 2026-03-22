@@ -1,0 +1,12 @@
+import express from "express";
+import { getChat,getChatList } from "../controllers/chat.controller.js";
+import { verifyJWT } from "../middlewares/auth.middleware.js";
+
+const router = express.Router();
+
+router.get("/list", verifyJWT, getChatList);
+
+
+router.get("/:userId", verifyJWT, getChat);
+
+export default router;
