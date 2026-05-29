@@ -1,7 +1,21 @@
 import nodemailer from "nodemailer";
+import dns from "node:dns";
+
+// Force IPv4 first on Render.
+// This helps fix: connect ENETUNREACH ... :465 / Connection timeout
+dns.setDefaultResultOrder("ipv4first");
 
 // ── Transporter (created once, reused) ──────────────────────
 let transporter = null;
+
+const escapeHtml = (value = "") => {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+};
 
 const getTransporter = () => {
   if (transporter) return transporter;
@@ -12,7 +26,7 @@ const getTransporter = () => {
   const pass = process.env.SMTP_PASS;
 
   if (!host || !user || !pass) {
-    console.warn("⚠️  SMTP env vars missing — emails will NOT be sent.");
+    console.warn("⚠️ SMTP env vars missing — emails will NOT be sent.");
     return null;
   }
 
@@ -20,7 +34,22 @@ const getTransporter = () => {
     host,
     port,
     secure: port === 465,
-    auth: { user, pass },
+
+    auth: {
+      user,
+      pass,
+    },
+
+    // Force IPv4 on Render
+    family: 4,
+
+    // Helpful for Gmail SMTP on port 587
+    requireTLS: port === 587,
+
+    // Avoid long hanging connection
+    connectionTimeout: 15000,
+    greetingTimeout: 15000,
+    socketTimeout: 15000,
   });
 
   return transporter;
@@ -29,6 +58,7 @@ const getTransporter = () => {
 const fromAddress = () => {
   const name = process.env.SMTP_FROM_NAME || "Skill Swap";
   const email = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
+
   return `"${name}" <${email}>`;
 };
 
@@ -52,12 +82,14 @@ const wrapHtml = (body) => `
               <h1 style="margin:0;font-size:22px;color:#ffffff;font-weight:700;letter-spacing:-0.3px;">⚡ Skill Swap</h1>
             </td>
           </tr>
+
           <!-- Body -->
           <tr>
             <td style="padding:32px;">
               ${body}
             </td>
           </tr>
+
           <!-- Footer -->
           <tr>
             <td style="padding:20px 32px;background:#fafafa;border-top:1px solid #f0f0f0;">
@@ -78,28 +110,49 @@ export const sendContactEmail = async ({ name, email, message }) => {
   const t = getTransporter();
   if (!t) return;
 
-  const receiverEmail = process.env.CONTACT_RECEIVER_EMAIL || process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
+  const receiverEmail =
+    process.env.CONTACT_RECEIVER_EMAIL ||
+    process.env.SMTP_FROM_EMAIL ||
+    process.env.SMTP_USER;
+
+  const safeName = escapeHtml(name);
+  const safeEmail = escapeHtml(email);
+  const safeMessage = escapeHtml(message);
 
   const html = wrapHtml(`
     <h2 style="margin:0 0 6px;font-size:20px;color:#111827;">📬 New Feedback Received</h2>
-    <p style="margin:0 0 24px;font-size:14px;color:#6b7280;">Someone submitted the contact form on your website.</p>
+    <p style="margin:0 0 24px;font-size:14px;color:#6b7280;">
+      Someone submitted the contact form on your website.
+    </p>
 
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
       <tr>
         <td style="padding:12px 16px;background:#f9fafb;border-radius:10px;border:1px solid #f3f4f6;">
-          <p style="margin:0 0 8px;font-size:13px;color:#9ca3af;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">From</p>
-          <p style="margin:0;font-size:15px;color:#111827;font-weight:600;">${name}</p>
-          <p style="margin:4px 0 0;font-size:14px;color:#2563eb;">${email}</p>
+          <p style="margin:0 0 8px;font-size:13px;color:#9ca3af;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">
+            From
+          </p>
+          <p style="margin:0;font-size:15px;color:#111827;font-weight:600;">
+            ${safeName}
+          </p>
+          <p style="margin:4px 0 0;font-size:14px;color:#2563eb;">
+            ${safeEmail}
+          </p>
         </td>
       </tr>
     </table>
 
     <div style="padding:16px;background:#f0f4ff;border-radius:10px;border-left:4px solid #2563eb;">
-      <p style="margin:0 0 8px;font-size:13px;color:#6b7280;font-weight:600;">MESSAGE</p>
-      <p style="margin:0;font-size:15px;color:#1f2937;line-height:1.6;white-space:pre-wrap;">${message}</p>
+      <p style="margin:0 0 8px;font-size:13px;color:#6b7280;font-weight:600;">
+        MESSAGE
+      </p>
+      <p style="margin:0;font-size:15px;color:#1f2937;line-height:1.6;white-space:pre-wrap;">
+        ${safeMessage}
+      </p>
     </div>
 
-    <p style="margin:24px 0 0;font-size:13px;color:#9ca3af;">You can reply directly to <strong>${email}</strong> to respond.</p>
+    <p style="margin:24px 0 0;font-size:13px;color:#9ca3af;">
+      You can reply directly to <strong>${safeEmail}</strong> to respond.
+    </p>
   `);
 
   try {
@@ -110,6 +163,7 @@ export const sendContactEmail = async ({ name, email, message }) => {
       subject: `New Feedback from ${name} — Skill Swap`,
       html,
     });
+
     console.log(`✅ Contact email sent to ${receiverEmail}`);
   } catch (error) {
     console.error("❌ Failed to send contact email:", error.message);
@@ -139,19 +193,27 @@ export const sendSessionNotificationEmail = async ({
     timeZone: "Asia/Kolkata",
   });
 
-  const modeLabel = {
-    chat: "💬 Chat",
-    video: "📹 Video Call",
-    audio: "🎧 Audio Call",
-    in_person: "🤝 In Person",
-  }[mode] || "💬 Chat";
+  const modeLabel =
+    {
+      chat: "💬 Chat",
+      video: "📹 Video Call",
+      audio: "🎧 Audio Call",
+      in_person: "🤝 In Person",
+    }[mode] || "💬 Chat";
 
   const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+
+  const safeRecipientName = escapeHtml(recipientName || "there");
+  const safeProposerName = escapeHtml(proposerName);
+  const safeSkill = escapeHtml(skill || "General");
+  const safeDateStr = escapeHtml(dateStr);
+  const safeDurationMinutes = escapeHtml(durationMinutes);
+  const safeModeLabel = escapeHtml(modeLabel);
 
   const html = wrapHtml(`
     <h2 style="margin:0 0 6px;font-size:20px;color:#111827;">🗓️ New Session Proposal</h2>
     <p style="margin:0 0 24px;font-size:14px;color:#6b7280;">
-      Hey <strong>${recipientName || "there"}</strong>, you have a new session proposal!
+      Hey <strong>${safeRecipientName}</strong>, you have a new session proposal!
     </p>
 
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
@@ -161,31 +223,35 @@ export const sendSessionNotificationEmail = async ({
             <tr>
               <td style="padding:6px 0;">
                 <span style="font-size:13px;color:#9ca3af;font-weight:600;">PROPOSED BY</span><br/>
-                <span style="font-size:15px;color:#111827;font-weight:600;">${proposerName}</span>
+                <span style="font-size:15px;color:#111827;font-weight:600;">${safeProposerName}</span>
               </td>
             </tr>
+
             <tr>
               <td style="padding:6px 0;">
                 <span style="font-size:13px;color:#9ca3af;font-weight:600;">SKILL</span><br/>
-                <span style="font-size:15px;color:#2563eb;font-weight:600;">${skill || "General"}</span>
+                <span style="font-size:15px;color:#2563eb;font-weight:600;">${safeSkill}</span>
               </td>
             </tr>
+
             <tr>
               <td style="padding:6px 0;">
                 <span style="font-size:13px;color:#9ca3af;font-weight:600;">SCHEDULED FOR</span><br/>
-                <span style="font-size:15px;color:#111827;">${dateStr}</span>
+                <span style="font-size:15px;color:#111827;">${safeDateStr}</span>
               </td>
             </tr>
+
             <tr>
               <td style="padding:6px 0;">
                 <span style="font-size:13px;color:#9ca3af;font-weight:600;">DURATION</span><br/>
-                <span style="font-size:15px;color:#111827;">${durationMinutes} minutes</span>
+                <span style="font-size:15px;color:#111827;">${safeDurationMinutes} minutes</span>
               </td>
             </tr>
+
             <tr>
               <td style="padding:6px 0;">
                 <span style="font-size:13px;color:#9ca3af;font-weight:600;">MODE</span><br/>
-                <span style="font-size:15px;color:#111827;">${modeLabel}</span>
+                <span style="font-size:15px;color:#111827;">${safeModeLabel}</span>
               </td>
             </tr>
           </table>
@@ -216,8 +282,12 @@ export const sendSessionNotificationEmail = async ({
       subject: `${proposerName} proposed a session — Skill Swap`,
       html,
     });
+
     console.log(`✅ Session notification email sent to ${recipientEmail}`);
   } catch (error) {
-    console.error("❌ Failed to send session notification email:", error.message);
+    console.error(
+      "❌ Failed to send session notification email:",
+      error.message
+    );
   }
 };
