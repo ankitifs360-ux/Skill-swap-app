@@ -5,21 +5,26 @@ const chatSchema = new mongoose.Schema(
     sender: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      required: true
+      required: true,
     },
     receiver: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      required: true
+      required: true,
     },
     message: {
       type: String,
-      required: true
+      required: true,
+      trim: true,
     },
-    seen:{
-      type:Boolean,
-      default:false
-    }
+    seen: {
+      type: Boolean,
+      default: false,
+    },
+    seenAt: {
+      type: Date,
+      default: null,
+    },
   },
   { timestamps: true }
 );

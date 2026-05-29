@@ -14,25 +14,25 @@ export const getChat = async (req, res) => {
       status: "accepted",
       $or: [
         { sender: req.user.id, receiver: userId },
-        { sender: userId, receiver: req.user.id }
-      ]
+        { sender: userId, receiver: req.user.id },
+      ],
     });
 
     if (!acceptedRequest) {
       return res.status(403).json({
-        message: "Chat allowed only after request is accepted"
+        message: "Chat allowed only after request is accepted",
       });
     }
 
     const chats = await Chat.find({
-  $or: [
-    { sender: req.user.id, receiver: userId },
-    { sender: userId, receiver: req.user.id }
-  ]
-})
-.populate("sender", "name email")
-.populate("receiver", "name email")
-.sort({ createdAt: 1 });
+      $or: [
+        { sender: req.user.id, receiver: userId },
+        { sender: userId, receiver: req.user.id },
+      ],
+    })
+      .populate("sender", "name email avatar lastSeen")
+      .populate("receiver", "name email avatar lastSeen")
+      .sort({ createdAt: 1 });
 
     return res.json(chats);
   } catch (error) {
@@ -47,28 +47,100 @@ export const getChatList = async (req, res) => {
     const chats = await Chat.find({
       $or: [{ sender: userId }, { receiver: userId }],
     })
-      .populate("sender", "name")
-      .populate("receiver", "name")
-      .sort({ updatedAt: -1 });
+      .populate("sender", "name avatar lastSeen reputation skillsToTeach skillsToLearn email createdAt")
+      .populate("receiver", "name avatar lastSeen reputation skillsToTeach skillsToLearn email createdAt")
+      .sort({ createdAt: -1 });
 
-    // remove duplicates (latest chat per user)
+    const unreadRows = await Chat.aggregate([
+      {
+        $match: {
+          receiver: new mongoose.Types.ObjectId(userId),
+          seen: false,
+        },
+      },
+      {
+        $group: {
+          _id: "$sender",
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+
+    const unreadMap = unreadRows.reduce((acc, row) => {
+      acc[row._id.toString()] = row.count;
+      return acc;
+    }, {});
+
     const map = new Map();
 
     chats.forEach((chat) => {
-      const otherUser =
-        chat.sender._id.toString() === userId
-          ? chat.receiver
-          : chat.sender;
+      const isCurrentUserSender = chat.sender._id.toString() === userId;
+      const otherUser = isCurrentUserSender ? chat.receiver : chat.sender;
+      const otherUserId = otherUser._id.toString();
 
-      map.set(otherUser._id.toString(), {
-        user: otherUser,
-        lastMessage: chat.message,
-        time: chat.updatedAt,
-      });
+      if (!map.has(otherUserId)) {
+        map.set(otherUserId, {
+          user: otherUser,
+          lastMessage: chat.message,
+          time: chat.createdAt,
+          unreadCount: unreadMap[otherUserId] || 0,
+          lastMessageIsMine: isCurrentUserSender,
+          lastMessageSeen: chat.seen,
+        });
+      }
     });
 
     return res.json([...map.values()]);
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+};
+
+export const getUnreadChatCount = async (req, res) => {
+  try {
+    const unreadCount = await Chat.countDocuments({
+      receiver: req.user.id,
+      seen: false,
+    });
+
+    return res.json({ unreadCount });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+export const markConversationRead = async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ message: "Invalid userId" });
+    }
+
+    const seenAt = new Date();
+
+    const updateResult = await Chat.updateMany(
+      {
+        sender: userId,
+        receiver: req.user.id,
+        seen: false,
+      },
+      { $set: { seen: true, seenAt } }
+    );
+
+    const io = req.app.get("io");
+    if (updateResult.modifiedCount > 0 && io) {
+      io.to(String(userId)).emit("unreadUpdated");
+      io.to(String(req.user.id)).emit("unreadUpdated");
+      io.to(String(userId)).emit("messagesSeen", {
+        readerId: String(req.user.id),
+        conversationUserId: String(userId),
+        seenAt,
+      });
+    }
+
+    return res.json({ message: "Conversation marked as read" });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
   }
 };

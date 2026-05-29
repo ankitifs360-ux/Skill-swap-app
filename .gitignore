@@ -5,3 +5,14 @@ frontend/.env
 dist
 frontend/dist
 uploads
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Build outputs
+build_output*.txt

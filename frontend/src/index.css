@@ -1,51 +1,40 @@
-body {
-  margin: 0;
-  font-family: Arial, sans-serif;
-  background: #f7f7f7;
-}
-
-* {
+*, *::before, *::after {
   box-sizing: border-box;
 }
 
-.page-title {
-  font-size: 28px;
-  margin-bottom: 20px;
+html {
+  scroll-behavior: smooth;
 }
 
-.section-card {
-  padding: 20px;
-  margin-bottom: 25px;
+body {
+  margin: 0;
+  font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: var(--bg-main);
+  color: var(--text-main);
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
 }
 
-.profile-grid {
-  display: grid;
-  gap: 8px;
+a {
+  color: inherit;
+  text-decoration: none;
 }
 
-.form-row {
-  display: flex;
-  gap: 12px;
-  margin-top: 10px;
-  margin-bottom: 10px;
-  flex-wrap: wrap;
+button, input, textarea, select {
+  font: inherit;
 }
 
-.success-text {
-  margin-top: 10px;
-  color: #4ade80;
+img {
+  display: block;
+  max-width: 100%;
 }
 
-.user-list {
-  margin-top: 15px;
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'DM Serif Display', Georgia, serif;
+  margin: 0;
+  line-height: 1.2;
 }
 
-.user-card {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 15px;
-  border-radius: 16px;
-  margin-bottom: 10px;
-  background: rgba(255, 255, 255, 0.06);
-}
+p { margin: 0; }
