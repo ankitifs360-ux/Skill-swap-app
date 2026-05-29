@@ -1,12 +1,4 @@
-import nodemailer from "nodemailer";
-import dns from "node:dns";
-
-// Force IPv4 first on Render.
-// This helps fix: connect ENETUNREACH ... :465 / Connection timeout
-dns.setDefaultResultOrder("ipv4first");
-
-// ── Transporter (created once, reused) ──────────────────────
-let transporter = null;
+const BREVO_API_URL = "https://api.brevo.com/v3/smtp/email";
 
 const escapeHtml = (value = "") => {
   return String(value)
@@ -17,49 +9,69 @@ const escapeHtml = (value = "") => {
     .replaceAll("'", "&#039;");
 };
 
-const getTransporter = () => {
-  if (transporter) return transporter;
+const getBrevoConfig = () => {
+  const apiKey = process.env.BREVO_API_KEY;
+  const senderName = process.env.BREVO_SENDER_NAME || "Skill Swap";
+  const senderEmail = process.env.BREVO_SENDER_EMAIL;
+  const receiverEmail = process.env.CONTACT_RECEIVER_EMAIL;
 
-  const host = process.env.SMTP_HOST;
-  const port = Number(process.env.SMTP_PORT) || 587;
-  const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_PASS;
-
-  if (!host || !user || !pass) {
-    console.warn("⚠️ SMTP env vars missing — emails will NOT be sent.");
+  if (!apiKey || !senderEmail) {
+    console.warn("⚠️ Brevo env vars missing — emails will NOT be sent.");
     return null;
   }
 
-  transporter = nodemailer.createTransport({
-    host,
-    port,
-    secure: port === 465,
-
-    auth: {
-      user,
-      pass,
-    },
-
-    // Force IPv4 on Render
-    family: 4,
-
-    // Helpful for Gmail SMTP on port 587
-    requireTLS: port === 587,
-
-    // Avoid long hanging connection
-    connectionTimeout: 15000,
-    greetingTimeout: 15000,
-    socketTimeout: 15000,
-  });
-
-  return transporter;
+  return {
+    apiKey,
+    senderName,
+    senderEmail,
+    receiverEmail: receiverEmail || senderEmail,
+  };
 };
 
-const fromAddress = () => {
-  const name = process.env.SMTP_FROM_NAME || "Skill Swap";
-  const email = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
+const sendBrevoEmail = async ({ to, subject, htmlContent, replyTo }) => {
+  const config = getBrevoConfig();
+  if (!config) return;
 
-  return `"${name}" <${email}>`;
+  const payload = {
+    sender: {
+      name: config.senderName,
+      email: config.senderEmail,
+    },
+    to: [
+      {
+        email: to,
+      },
+    ],
+    subject,
+    htmlContent,
+  };
+
+  if (replyTo?.email) {
+    payload.replyTo = {
+      email: replyTo.email,
+      name: replyTo.name || replyTo.email,
+    };
+  }
+
+  const response = await fetch(BREVO_API_URL, {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/json",
+      "api-key": config.apiKey,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(
+      data?.message || `Brevo email failed with status ${response.status}`
+    );
+  }
+
+  return data;
 };
 
 // ── Shared HTML wrapper ─────────────────────────────────────
@@ -76,21 +88,18 @@ const wrapHtml = (body) => `
     <tr>
       <td align="center">
         <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
-          <!-- Header -->
           <tr>
             <td style="background:linear-gradient(135deg,#2563eb,#7c3aed);padding:28px 32px;">
               <h1 style="margin:0;font-size:22px;color:#ffffff;font-weight:700;letter-spacing:-0.3px;">⚡ Skill Swap</h1>
             </td>
           </tr>
 
-          <!-- Body -->
           <tr>
             <td style="padding:32px;">
               ${body}
             </td>
           </tr>
 
-          <!-- Footer -->
           <tr>
             <td style="padding:20px 32px;background:#fafafa;border-top:1px solid #f0f0f0;">
               <p style="margin:0;font-size:12px;color:#9ca3af;text-align:center;">
@@ -107,13 +116,8 @@ const wrapHtml = (body) => `
 
 // ── 1. Contact / Feedback email → site owner ────────────────
 export const sendContactEmail = async ({ name, email, message }) => {
-  const t = getTransporter();
-  if (!t) return;
-
-  const receiverEmail =
-    process.env.CONTACT_RECEIVER_EMAIL ||
-    process.env.SMTP_FROM_EMAIL ||
-    process.env.SMTP_USER;
+  const config = getBrevoConfig();
+  if (!config) return;
 
   const safeName = escapeHtml(name);
   const safeEmail = escapeHtml(email);
@@ -156,17 +160,19 @@ export const sendContactEmail = async ({ name, email, message }) => {
   `);
 
   try {
-    await t.sendMail({
-      from: fromAddress(),
-      to: receiverEmail,
-      replyTo: email,
+    await sendBrevoEmail({
+      to: config.receiverEmail,
       subject: `New Feedback from ${name} — Skill Swap`,
-      html,
+      htmlContent: html,
+      replyTo: {
+        email,
+        name,
+      },
     });
 
-    console.log(`✅ Contact email sent to ${receiverEmail}`);
+    console.log(`✅ Contact email sent via Brevo to ${config.receiverEmail}`);
   } catch (error) {
-    console.error("❌ Failed to send contact email:", error.message);
+    console.error("❌ Failed to send contact email via Brevo:", error.message);
   }
 };
 
@@ -180,9 +186,6 @@ export const sendSessionNotificationEmail = async ({
   mode,
   durationMinutes,
 }) => {
-  const t = getTransporter();
-  if (!t) return;
-
   const dateStr = new Date(scheduledFor).toLocaleString("en-IN", {
     weekday: "long",
     year: "numeric",
@@ -276,17 +279,16 @@ export const sendSessionNotificationEmail = async ({
   `);
 
   try {
-    await t.sendMail({
-      from: fromAddress(),
+    await sendBrevoEmail({
       to: recipientEmail,
       subject: `${proposerName} proposed a session — Skill Swap`,
-      html,
+      htmlContent: html,
     });
 
-    console.log(`✅ Session notification email sent to ${recipientEmail}`);
+    console.log(`✅ Session notification email sent via Brevo to ${recipientEmail}`);
   } catch (error) {
     console.error(
-      "❌ Failed to send session notification email:",
+      "❌ Failed to send session notification email via Brevo:",
       error.message
     );
   }
