@@ -1,6 +1,7 @@
 services:
   - type: web
     name: skill-swap-backend
+    rootDir: backend
     env: node
     buildCommand: npm install
     startCommand: npm start
